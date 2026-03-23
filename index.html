@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FacePuppet v0.5</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=Space+Mono:wght@400;700&display=swap');
+  :root { --bg:#0a0a0f; --surface:#13131a; --border:#1e1e2e; --accent:#7c3aed; --accent2:#06b6d4; --text:#e2e8f0; --muted:#475569; --danger:#ef4444; --success:#10b981; --warn:#f59e0b; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:'Space Mono',monospace; min-height:100vh; overflow-x:hidden; }
+  body::before { content:''; position:fixed; inset:0; background-image:linear-gradient(rgba(124,58,237,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(124,58,237,.03) 1px,transparent 1px); background-size:40px 40px; pointer-events:none; z-index:0; }
+  header { position:relative; z-index:10; padding:16px 28px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); }
+  .logo { font-family:'Syne',sans-serif; font-weight:800; font-size:1.25rem; }
+  .logo span { color:var(--accent); } .logo em { color:var(--accent2); font-style:normal; }
+  .badge { font-size:.58rem; padding:3px 8px; border-radius:999px; border:1px solid var(--accent); color:var(--accent); letter-spacing:2px; text-transform:uppercase; }
+
+  /* ── BOUTON MODE FLOTTANT ── */
+  .btn-float {
+    font-size:.6rem; padding:4px 12px; border-radius:999px;
+    border:1px solid var(--accent2); color:var(--accent2);
+    background:rgba(6,182,212,.08); cursor:pointer;
+    font-family:'Space Mono',monospace; letter-spacing:1px;
+    text-transform:uppercase; transition:all .2s;
+  }
+  .btn-float:hover { background:rgba(6,182,212,.18); }
+  .btn-float.active { background:rgba(6,182,212,.22); border-color:var(--success); color:var(--success); }
+
+  /* ── BULLE FLOTTANTE ── */
+  #fp-bubble {
+    display: none;
+    position: fixed;
+    z-index: 9999;
+    bottom: 28px;
+    right: 28px;
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    overflow: hidden;
+    cursor: grab;
+    box-shadow: 0 0 0 3px rgba(124,58,237,.7), 0 0 0 6px rgba(124,58,237,.2), 0 8px 32px rgba(0,0,0,.6);
+    transition: box-shadow .2s, transform .15s;
+    user-select: none;
+    touch-action: none;
+  }
+  #fp-bubble:hover {
+    box-shadow: 0 0 0 3px rgba(6,182,212,.9), 0 0 0 8px rgba(6,182,212,.2), 0 12px 40px rgba(0,0,0,.7);
+  }
+  #fp-bubble:active { cursor: grabbing; transform: scale(1.04); }
+
+  /* Ring animé quand actif */
+  #fp-bubble.speaking {
+    box-shadow: 0 0 0 3px rgba(0,230,118,.9), 0 0 0 8px rgba(0,230,118,.25), 0 8px 32px rgba(0,0,0,.6);
+    animation: ring-pulse 1s ease-in-out infinite;
+  }
+  @keyframes ring-pulse {
+    0%,100% { box-shadow: 0 0 0 3px rgba(0,230,118,.9), 0 0 0 8px rgba(0,230,118,.25), 0 8px 32px rgba(0,0,0,.6); }
+    50%      { box-shadow: 0 0 0 3px rgba(0,230,118,.9), 0 0 0 14px rgba(0,230,118,.12), 0 8px 32px rgba(0,0,0,.6); }
+  }
+
+  /* Canvas bulle */
+  #bubble-canvas {
+    width: 100%; height: 100%;
+    display: block;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+
+  /* Barre de contrôle sous la bulle */
+  #bubble-bar {
+    display: none;
+    position: fixed;
+    z-index: 9998;
+    bottom: 200px;
+    right: 16px;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .bubble-btn {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: rgba(13,17,23,.92);
+    backdrop-filter: blur(8px);
+    color: var(--muted);
+    font-size: .9rem;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .2s;
+  }
+  .bubble-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+  .bubble-btn.active { border-color: var(--success); color: var(--success); background: rgba(0,230,118,.1); }
+  .main { position:relative; z-index:1; display:grid; grid-template-columns:300px 1fr; height:calc(100vh - 57px); }
+  .sidebar { background:var(--surface); border-right:1px solid var(--border); padding:16px 14px; display:flex; flex-direction:column; gap:14px; overflow-y:auto; }
+  .section-title { font-family:'Syne',sans-serif; font-size:.58rem; letter-spacing:3px; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
+
+  /* Upload zones côte à côte */
+  .upload-pair { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .upload-slot { border:2px dashed var(--border); border-radius:10px; padding:14px 6px; text-align:center; cursor:pointer; transition:all .3s; position:relative; }
+  .upload-slot:hover,.upload-slot.drag { border-color:var(--accent); background:rgba(124,58,237,.05); }
+  .upload-slot.loaded { border-color:var(--success); border-style:solid; }
+  .upload-slot input { display:none; }
+  .upload-slot .slot-icon { font-size:1.4rem; display:block; margin-bottom:4px; }
+  .upload-slot .slot-label { font-size:.6rem; color:var(--muted); line-height:1.4; }
+  .upload-slot .slot-name { font-size:.62rem; font-weight:700; color:var(--text); display:block; margin-bottom:2px; }
+  .slot-preview { width:100%; height:70px; object-fit:cover; border-radius:6px; display:none; border:1px solid var(--border); }
+  .slot-check { position:absolute; top:4px; right:4px; font-size:.7rem; display:none; }
+  .upload-slot.loaded .slot-check { display:block; }
+
+  .control-group { display:flex; flex-direction:column; gap:10px; }
+  .control-row { display:flex; flex-direction:column; gap:4px; }
+  .control-row label { font-size:.67rem; color:var(--muted); display:flex; justify-content:space-between; }
+  .control-row label span { color:var(--accent2); }
+  input[type=range] { -webkit-appearance:none; width:100%; height:3px; background:var(--border); border-radius:999px; outline:none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:13px; height:13px; background:var(--accent); border-radius:50%; cursor:pointer; box-shadow:0 0 6px rgba(124,58,237,.5); }
+
+  .toggle-row { display:flex; align-items:center; justify-content:space-between; }
+  .toggle-row label { font-size:.7rem; color:var(--muted); }
+  .toggle { width:36px; height:19px; background:var(--border); border-radius:999px; position:relative; cursor:pointer; transition:background .3s; flex-shrink:0; }
+  .toggle.on { background:var(--accent); }
+  .toggle::after { content:''; position:absolute; width:13px; height:13px; background:white; border-radius:50%; top:3px; left:3px; transition:transform .3s; }
+  .toggle.on::after { transform:translateX(17px); }
+
+  .btn { width:100%; padding:10px; border-radius:8px; border:none; cursor:pointer; font-family:'Space Mono',monospace; font-size:.7rem; font-weight:700; letter-spacing:1px; transition:all .2s; }
+  .btn-primary { background:linear-gradient(135deg,var(--accent),#9333ea); color:white; box-shadow:0 4px 16px rgba(124,58,237,.3); }
+  .btn-primary:hover { transform:translateY(-1px); }
+  .btn-primary:disabled { opacity:.35; cursor:not-allowed; transform:none; }
+  .btn-outline { background:transparent; border:1px solid var(--border); color:var(--muted); }
+  .btn-outline:hover { border-color:var(--accent2); color:var(--accent2); }
+
+  .status { font-size:.65rem; padding:7px 10px; border-radius:7px; display:flex; align-items:flex-start; gap:7px; background:rgba(16,185,129,.08); border:1px solid rgba(16,185,129,.2); color:var(--success); line-height:1.5; }
+  .status.loading { background:rgba(6,182,212,.08); border-color:rgba(6,182,212,.2); color:var(--accent2); }
+  .status.error   { background:rgba(239,68,68,.08);  border-color:rgba(239,68,68,.2);  color:var(--danger); }
+  .status-dot { width:5px; height:5px; border-radius:50%; background:currentColor; flex-shrink:0; margin-top:4px; animation:pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  .tip { font-size:.62rem; color:var(--muted); line-height:1.6; padding:8px 10px; background:rgba(6,182,212,.04); border:1px solid rgba(6,182,212,.1); border-radius:7px; }
+  .tip strong { color:var(--accent2); }
+
+  /* Mouth meter */
+  .meter-row { display:flex; flex-direction:column; gap:4px; }
+  .meter-label { font-size:.62rem; color:var(--muted); display:flex; justify-content:space-between; }
+  .meter-label span { color:var(--warn); }
+  .meter-bar { height:6px; background:var(--border); border-radius:999px; overflow:hidden; }
+  .meter-fill { height:100%; width:0%; background:linear-gradient(90deg,var(--accent2),var(--warn)); border-radius:999px; transition:width .08s; }
+
+  .canvas-area { display:flex; flex-direction:column; align-items:center; justify-content:center; position:relative; overflow:hidden; background:radial-gradient(ellipse at center,#0f0f1a 0%,var(--bg) 70%); }
+  .canvas-wrapper { position:relative; display:inline-flex; }
+  #output-canvas { border-radius:10px; border:1px solid var(--border); box-shadow:0 0 50px rgba(124,58,237,.1); max-width:680px; max-height:580px; display:block; }
+  #overlay-canvas { position:absolute; top:0; left:0; border-radius:10px; pointer-events:none; }
+  #webcam-video { display:none; }
+
+  .placeholder { text-align:center; padding:40px; }
+  .placeholder-icon { font-size:3rem; margin-bottom:12px; display:block; opacity:.2; }
+  .placeholder h2 { font-family:'Syne',sans-serif; font-size:1.1rem; color:var(--muted); margin-bottom:6px; }
+  .placeholder p { font-size:.68rem; color:var(--border); max-width:260px; margin:0 auto; line-height:1.7; }
+
+  .info-bar { position:absolute; bottom:14px; left:50%; transform:translateX(-50%); display:flex; gap:12px; background:rgba(10,10,15,.85); backdrop-filter:blur(10px); border:1px solid var(--border); border-radius:999px; padding:6px 16px; font-size:.62rem; color:var(--muted); white-space:nowrap; }
+  .info-bar span { display:flex; align-items:center; gap:4px; }
+  .info-bar .dot { width:5px; height:5px; border-radius:50%; background:var(--success); animation:pulse 1.5s infinite; }
+  ::-webkit-scrollbar { width:3px; } ::-webkit-scrollbar-track { background:transparent; } ::-webkit-scrollbar-thumb { background:var(--border); border-radius:999px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Face<span>Puppet</span><em>.ai</em></div>
+  <div style="display:flex;gap:10px;align-items:center;">
+    <button class="btn-float" id="btn-float-mode">⬡ Mode flottant</button>
+    <div class="badge">v0.5</div>
+  </div>
+</header>
+<div class="main">
+  <aside class="sidebar">
+
+    <!-- UPLOAD 2 IMAGES -->
+    <div>
+      <p class="section-title">🖼️ Tes 2 images avatar</p>
+      <div class="upload-pair">
+        <!-- Bouche fermée -->
+        <div class="upload-slot" id="slot-closed">
+          <input type="file" id="file-closed" accept="image/*">
+          <span class="slot-check">✅</span>
+          <span class="slot-icon">😐</span>
+          <span class="slot-name">Fermée</span>
+          <span class="slot-label">bouche<br>fermée</span>
+          <img class="slot-preview" id="prev-closed">
+        </div>
+        <!-- Bouche ouverte -->
+        <div class="upload-slot" id="slot-open">
+          <input type="file" id="file-open" accept="image/*">
+          <span class="slot-check">✅</span>
+          <span class="slot-icon">😮</span>
+          <span class="slot-name">Ouverte</span>
+          <span class="slot-label">bouche<br>ouverte</span>
+          <img class="slot-preview" id="prev-open">
+        </div>
+      </div>
+      <p style="font-size:.6rem;color:var(--muted);margin-top:6px;line-height:1.5;">
+        💡 Même image, même pose — juste la bouche différente. PNG transparent = parfait.
+      </p>
+    </div>
+
+    <!-- PARAMÈTRES -->
+    <div>
+      <p class="section-title">⚙️ Paramètres</p>
+      <div class="control-group">
+
+        <div class="control-row">
+          <label>Sensibilité bouche <span id="val-mouth">60</span>%</label>
+          <input type="range" id="ctrl-mouth" min="10" max="100" value="60">
+        </div>
+
+        <div class="control-row">
+          <label>Rotation tête <span id="val-rot">50</span>%</label>
+          <input type="range" id="ctrl-rot" min="0" max="150" value="50">
+        </div>
+
+        <div class="control-row">
+          <label>Lissage <span id="val-smooth">70</span>%</label>
+          <input type="range" id="ctrl-smooth" min="0" max="95" value="70">
+        </div>
+
+        <div class="meter-row">
+          <div class="meter-label">Ouverture bouche <span id="val-open">0%</span></div>
+          <div class="meter-bar"><div class="meter-fill" id="meter-fill"></div></div>
+        </div>
+
+        <div class="toggle-row">
+          <label>Afficher mesh webcam</label>
+          <div class="toggle" id="toggle-mesh"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ACTIONS -->
+    <div>
+      <p class="section-title">🎬 Actions</p>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button class="btn btn-primary" id="btn-start" disabled>▶ Démarrer webcam</button>
+        <button class="btn btn-outline"  id="btn-stop"  disabled>⏹ Arrêter</button>
+      </div>
+    </div>
+
+    <div id="status-box" class="status loading">
+      <div class="status-dot"></div>
+      <span id="status-text">Chargement MediaPipe…</span>
+    </div>
+
+    <div class="tip">
+      <strong>Comment ça marche :</strong><br>
+      MediaPipe mesure l'ouverture de ta bouche en temps réel. L'app fait un <em>blend</em> entre ton image bouche-fermée et bouche-ouverte selon ce ratio. + rotation de tête incluse !
+    </div>
+
+  </aside>
+
+  <main class="canvas-area">
+    <div class="placeholder" id="placeholder">
+      <span class="placeholder-icon">🎭</span>
+      <h2>2 images = 1 avatar vivant</h2>
+      <p>Upload ton avatar bouche fermée et bouche ouverte, puis lance la webcam.</p>
+    </div>
+    <div class="canvas-wrapper" id="canvas-wrapper" style="display:none;">
+      <canvas id="output-canvas"></canvas>
+      <canvas id="overlay-canvas"></canvas>
+      <video id="webcam-video" autoplay playsinline muted></video>
+    </div>
+    <div class="info-bar" id="info-bar" style="display:none;">
+      <span><div class="dot"></div> LIVE</span>
+      <span id="fps-out">0 FPS</span>
+      <span id="mouth-out">👄 0%</span>
+      <span id="rot-out">🔄 0°</span>
+    </div>
+  </main>
+</div>
+
+<!-- ── BULLE FLOTTANTE ── -->
+<div id="fp-bubble">
+  <canvas id="bubble-canvas"></canvas>
+</div>
+
+<!-- Barre de contrôle mini -->
+<div id="bubble-bar">
+  <button class="bubble-btn" id="bb-size"   title="Taille">⊞</button>
+  <button class="bubble-btn" id="bb-close"  title="Fermer">✕</button>
+</div>
+
+<script src="/mediapipe/camera_utils.js" crossorigin="anonymous"></script>
+<script src="/mediapipe/face_mesh.js" crossorigin="anonymous"></script>
+<script>
+// ═══════════════════════════════════════════════
+// ÉTAT
+// ═══════════════════════════════════════════════
+let imgClosed = null;   // Image bouche fermée
+let imgOpen   = null;   // Image bouche ouverte
+let faceMesh  = null;
+let mpCam     = null;
+let isRunning = false;
+let showMesh  = false;
+
+// Paramètres
+let mouthSensitivity = 0.60;
+let rotIntensity     = 0.50;
+let smoothing        = 0.70;
+
+// Valeurs animées (lissées)
+let smoothMouthRatio = 0;
+let smoothRoll       = 0;
+let smoothYaw        = 0;
+let smoothPitch      = 0;
+
+// FPS
+let lastFpsTime = 0, frameCount = 0;
+
+// Canvas offscreen pour les deux images
+const canvasClosed = document.createElement('canvas');
+const ctxClosed    = canvasClosed.getContext('2d');
+const canvasOpen   = document.createElement('canvas');
+const ctxOpen      = canvasOpen.getContext('2d');
+
+// ═══════════════════════════════════════════════
+// DOM
+// ═══════════════════════════════════════════════
+const $ = id => document.getElementById(id);
+const slotClosed   = $('slot-closed');
+const slotOpen     = $('slot-open');
+const fileClosed   = $('file-closed');
+const fileOpen     = $('file-open');
+const prevClosed   = $('prev-closed');
+const prevOpen     = $('prev-open');
+const btnStart     = $('btn-start');
+const btnStop      = $('btn-stop');
+const placeholder  = $('placeholder');
+const canvasWrapper= $('canvas-wrapper');
+const outputCanvas = $('output-canvas');
+const overlayCanvas= $('overlay-canvas');
+const webcamVideo  = $('webcam-video');
+const infoBar      = $('info-bar');
+const toggleMesh   = $('toggle-mesh');
+const meterFill    = $('meter-fill');
+
+const outCtx  = outputCanvas.getContext('2d');
+const ovrCtx  = overlayCanvas.getContext('2d');
+
+// ═══════════════════════════════════════════════
+// EVENTS UPLOAD
+// ═══════════════════════════════════════════════
+function setupSlot(slot, fileInput, preview, key) {
+  slot.addEventListener('click', () => fileInput.click());
+  slot.addEventListener('dragover',  e => { e.preventDefault(); slot.classList.add('drag'); });
+  slot.addEventListener('dragleave', () => slot.classList.remove('drag'));
+  slot.addEventListener('drop', e => {
+    e.preventDefault(); slot.classList.remove('drag');
+    e.dataTransfer.files[0] && loadSlot(e.dataTransfer.files[0], preview, slot, key);
+  });
+  fileInput.addEventListener('change', () => fileInput.files[0] && loadSlot(fileInput.files[0], preview, slot, key));
+}
+
+setupSlot(slotClosed, fileClosed, prevClosed, 'closed');
+setupSlot(slotOpen,   fileOpen,   prevOpen,   'open');
+
+function loadSlot(file, previewEl, slotEl, key) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      if (key === 'closed') {
+        imgClosed = img;
+        canvasClosed.width  = img.naturalWidth;
+        canvasClosed.height = img.naturalHeight;
+        ctxClosed.clearRect(0,0,canvasClosed.width,canvasClosed.height);
+        ctxClosed.drawImage(img,0,0);
+      } else {
+        imgOpen = img;
+        canvasOpen.width  = img.naturalWidth;
+        canvasOpen.height = img.naturalHeight;
+        ctxOpen.clearRect(0,0,canvasOpen.width,canvasOpen.height);
+        ctxOpen.drawImage(img,0,0);
+      }
+      previewEl.src = e.target.result;
+      previewEl.style.display = 'block';
+      slotEl.querySelector('.slot-icon').style.display = 'none';
+      slotEl.classList.add('loaded');
+      checkReady();
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function checkReady() {
+  const ready = imgClosed && imgOpen && faceMesh;
+  btnStart.disabled = !ready;
+  if (ready) setStatus('Les 2 images sont prêtes — lance la webcam !', 'ok');
+}
+
+// ═══════════════════════════════════════════════
+// CONTRÔLES
+// ═══════════════════════════════════════════════
+toggleMesh.addEventListener('click', () => { showMesh = !showMesh; toggleMesh.classList.toggle('on', showMesh); });
+
+$('ctrl-mouth').addEventListener('input',  () => { mouthSensitivity = $('ctrl-mouth').value/100;  $('val-mouth').textContent  = $('ctrl-mouth').value; });
+$('ctrl-rot').addEventListener('input',    () => { rotIntensity     = $('ctrl-rot').value/100;    $('val-rot').textContent    = $('ctrl-rot').value; });
+$('ctrl-smooth').addEventListener('input', () => { smoothing        = $('ctrl-smooth').value/100; $('val-smooth').textContent = $('ctrl-smooth').value; });
+
+btnStart.addEventListener('click', startWebcam);
+btnStop.addEventListener('click',  stopWebcam);
+
+// ═══════════════════════════════════════════════
+// MEDIAPIPE
+// ═══════════════════════════════════════════════
+function initMediaPipe() {
+  setStatus('Chargement MediaPipe…', 'loading');
+  faceMesh = new FaceMesh({
+    locateFile: f => `/mediapipe/${f}`
+  });
+  faceMesh.setOptions({
+    maxNumFaces: 1,
+    refineLandmarks: true,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+  faceMesh.onResults(onResults);
+  faceMesh.initialize()
+    .then(() => { setStatus('MediaPipe prêt ✓ — upload tes 2 images !', 'ok'); checkReady(); })
+    .catch(err => setStatus('Erreur MediaPipe: ' + err.message, 'error'));
+}
+
+// ═══════════════════════════════════════════════
+// WEBCAM
+// ═══════════════════════════════════════════════
+async function startWebcam() {
+  if (!window.isSecureContext) { alert('HTTPS requis !'); return; }
+  if (!navigator.mediaDevices?.getUserMedia) { alert('Caméra non disponible'); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{ width:640, height:480, facingMode:'user' } });
+    webcamVideo.srcObject = stream;
+    await webcamVideo.play();
+
+    isRunning = true;
+    placeholder.style.display   = 'none';
+    canvasWrapper.style.display = 'inline-flex';
+    infoBar.style.display       = 'flex';
+    btnStart.disabled = true;
+    btnStop.disabled  = false;
+    setStatus('Webcam active — bouge la tête et la bouche !', 'loading');
+
+    // Canvas = dimensions de l'image bouche fermée
+    const W = canvasClosed.width;
+    const H = canvasClosed.height;
+    outputCanvas.width  = W;
+    outputCanvas.height = H;
+    overlayCanvas.width = W;
+    overlayCanvas.height= H;
+
+    // Afficher l'image neutre
+    outCtx.drawImage(canvasClosed, 0, 0);
+
+    mpCam = new Camera(webcamVideo, {
+      onFrame: async () => { if (isRunning) await faceMesh.send({ image: webcamVideo }); },
+      width: 640, height: 480
+    });
+    mpCam.start();
+
+  } catch(err) {
+    if (err.name==='NotReadableError') { setStatus('❌ Caméra occupée', 'error'); alert('Ferme Zoom/Teams/Meet.'); }
+    else if (err.name==='NotAllowedError') { setStatus('❌ Permission refusée', 'error'); }
+    else { setStatus('❌ ' + err.message, 'error'); }
+  }
+}
+
+function stopWebcam() {
+  isRunning = false;
+  mpCam?.stop();
+  if (webcamVideo.srcObject) { webcamVideo.srcObject.getTracks().forEach(t=>t.stop()); webcamVideo.srcObject=null; }
+  if (imgClosed) outCtx.drawImage(canvasClosed,0,0);
+  ovrCtx.clearRect(0,0,overlayCanvas.width,overlayCanvas.height);
+  btnStart.disabled=false; btnStop.disabled=true;
+  infoBar.style.display='none';
+  smoothMouthRatio=0; smoothRoll=0; smoothYaw=0; smoothPitch=0;
+  setStatus('Arrêté', 'ok');
+}
+
+// ═══════════════════════════════════════════════
+// CALCUL OUVERTURE BOUCHE
+// landmarks bouche : 13=lèvre sup intérieure, 14=lèvre inf intérieure
+// on mesure la distance verticale normalisée par la distance inter-yeux
+// ═══════════════════════════════════════════════
+function getMouthOpenRatio(lms) {
+  // Distance verticale bouche (intérieure)
+  const topLip    = lms[13];
+  const bottomLip = lms[14];
+  const mouthOpen = Math.abs(bottomLip.y - topLip.y);
+
+  // Distance inter-yeux pour normaliser (invariant à la distance caméra)
+  const leftEye  = lms[33];
+  const rightEye = lms[263];
+  const eyeDist  = Math.sqrt(Math.pow(rightEye.x-leftEye.x,2) + Math.pow(rightEye.y-leftEye.y,2));
+
+  if (eyeDist < 0.001) return 0;
+  const ratio = mouthOpen / eyeDist;
+
+  // Calibration : bouche fermée ≈ 0.05, grande ouverte ≈ 0.5
+  const minR = 0.04, maxR = 0.35;
+  return Math.max(0, Math.min(1, (ratio - minR) / (maxR - minR)));
+}
+
+// ═══════════════════════════════════════════════
+// CALCUL ROTATION TÊTE
+// ═══════════════════════════════════════════════
+function getHeadPose(lms) {
+  const le    = lms[468] || lms[33];   // oeil gauche
+  const re    = lms[473] || lms[263];  // oeil droit
+  const nose  = lms[1];                // nez
+  const chin  = lms[152];              // menton
+
+  // Roll = inclinaison gauche/droite
+  const roll = Math.atan2(re.y - le.y, re.x - le.x);
+
+  // Yaw = rotation gauche/droite (nez vs centre yeux)
+  const eyeMidX = (le.x + re.x) / 2;
+  const yaw = (nose.x - eyeMidX) * 5;  // ~-1 à 1
+
+  // Pitch = haut/bas (nez vs centre yeux/menton)
+  const eyeMidY = (le.y + re.y) / 2;
+  const faceH   = Math.abs(chin.y - eyeMidY);
+  const pitch   = faceH > 0.001 ? (nose.y - eyeMidY) / faceH - 0.35 : 0;
+
+  return { roll, yaw, pitch };
+}
+
+// ═══════════════════════════════════════════════
+// RENDU PRINCIPAL
+// Blend entre imgClosed et imgOpen selon mouthRatio
+// + transformation affine pour rotation tête
+// ═══════════════════════════════════════════════
+function render(mouthRatio, roll, yaw, pitch) {
+  const W = outputCanvas.width;
+  const H = outputCanvas.height;
+
+  outCtx.clearRect(0, 0, W, H);
+  outCtx.save();
+
+  // Centrer, appliquer rotation/translation
+  outCtx.translate(W/2, H/2);
+  outCtx.rotate(roll * rotIntensity * 0.7);
+
+  // Translation yaw (gauche/droite) et pitch (haut/bas)
+  const tx = yaw   * W * rotIntensity * 0.06;
+  const ty = pitch * H * rotIntensity * 0.06;
+  outCtx.translate(tx, ty);
+
+  // Légère perspective sur yaw : scale X
+  const scaleX = 1 - Math.abs(yaw) * rotIntensity * 0.08;
+  outCtx.scale(scaleX, 1);
+
+  outCtx.translate(-W/2, -H/2);
+
+  // ── Image bouche fermée (base) ────────────────
+  outCtx.globalAlpha = 1;
+  outCtx.drawImage(canvasClosed, 0, 0, W, H);
+
+  // ── Image bouche ouverte (blend par-dessus) ───
+  // On dessine l'image ouverte avec une opacité = mouthRatio
+  if (mouthRatio > 0.01 && canvasOpen.width > 0) {
+    // Si les deux images ont le même fond (PNG transparent), le blend est parfait.
+    // Si images opaques, on utilise un blend intelligent :
+    // on utilise le mode 'source-over' avec alpha = mouthRatio
+    outCtx.globalAlpha = Math.min(1, mouthRatio * 1.2); // léger boost
+    outCtx.drawImage(canvasOpen, 0, 0, W, H);
+  }
+
+  outCtx.restore();
+  outCtx.globalAlpha = 1;
+}
+
+// ═══════════════════════════════════════════════
+// MESH OVERLAY (optionnel, sur webcam recadré)
+// ═══════════════════════════════════════════════
+function renderMeshOverlay(lms) {
+  const W = overlayCanvas.width;
+  const H = overlayCanvas.height;
+  ovrCtx.clearRect(0, 0, W, H);
+  if (!showMesh) return;
+
+  // Afficher une version miniature de la webcam en coin + mesh dessus
+  const miniW = 160, miniH = 120;
+  const miniX = W - miniW - 10, miniY = 10;
+
+  // Fond mini webcam
+  ovrCtx.save();
+  ovrCtx.beginPath();
+  ovrCtx.roundRect(miniX, miniY, miniW, miniH, 8);
+  ovrCtx.clip();
+  ovrCtx.drawImage(webcamVideo, miniX, miniY, miniW, miniH);
+  ovrCtx.restore();
+  ovrCtx.strokeStyle='rgba(124,58,237,0.8)';
+  ovrCtx.lineWidth=1;
+  ovrCtx.strokeRect(miniX, miniY, miniW, miniH);
+
+  // Mesh sur la mini webcam
+  const KEY_SEGS = [
+    [61,185,40,39,37,0,267,269,270,409,291],  // lèvre sup ext
+    [61,146,91,181,84,17,314,405,321,375,291], // lèvre inf ext
+    [78,95,88,178,87,14,317,402,318,324,308],  // lèvre sup int
+    [78,191,80,81,82,13,312,311,310,415,308],  // lèvre inf int
+    [33,246,161,160,159,158,157,173,133],       // oeil G
+    [362,398,384,385,386,387,388,466,263],      // oeil D
+  ];
+
+  ovrCtx.strokeStyle = 'rgba(6,182,212,0.9)';
+  ovrCtx.lineWidth = 1.2;
+  for (const seg of KEY_SEGS) {
+    ovrCtx.beginPath();
+    seg.forEach((idx, i) => {
+      if (idx >= lms.length) return;
+      const x = miniX + lms[idx].x * miniW;
+      const y = miniY + lms[idx].y * miniH;
+      i === 0 ? ovrCtx.moveTo(x,y) : ovrCtx.lineTo(x,y);
+    });
+    ovrCtx.stroke();
+  }
+
+  // Point nez et bouche
+  ovrCtx.fillStyle = 'rgba(255,200,0,0.9)';
+  [1, 13, 14, 152].forEach(idx => {
+    if (idx>=lms.length) return;
+    ovrCtx.beginPath();
+    ovrCtx.arc(miniX+lms[idx].x*miniW, miniY+lms[idx].y*miniH, 2.5, 0, Math.PI*2);
+    ovrCtx.fill();
+  });
+
+  // Label ouverture
+  ovrCtx.fillStyle='rgba(6,182,212,0.9)';
+  ovrCtx.font='10px monospace';
+  ovrCtx.fillText('WEBCAM', miniX+4, miniY+miniH+12);
+}
+
+// ═══════════════════════════════════════════════
+// CALLBACK MEDIAPIPE
+// ═══════════════════════════════════════════════
+function onResults(results) {
+  if (!isRunning || !imgClosed || !imgOpen) return;
+
+  // FPS
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFpsTime >= 1000) {
+    $('fps-out').textContent = frameCount + ' FPS';
+    frameCount = 0; lastFpsTime = now;
+  }
+
+  if (!results.multiFaceLandmarks?.length) {
+    // Pas de visage : afficher image neutre
+    outCtx.clearRect(0,0,outputCanvas.width,outputCanvas.height);
+    outCtx.drawImage(canvasClosed,0,0,outputCanvas.width,outputCanvas.height);
+    ovrCtx.clearRect(0,0,overlayCanvas.width,overlayCanvas.height);
+    meterFill.style.width = '0%';
+    $('val-open').textContent = '0%';
+    setStatus('Aucun visage détecté — montre-toi !', 'loading');
+    return;
+  }
+
+  const lms = results.multiFaceLandmarks[0];
+
+  // ── Calculs ──────────────────────────────────
+  const rawMouth = getMouthOpenRatio(lms);
+  const pose     = getHeadPose(lms);
+
+  // Lissage exponentiel
+  const s = smoothing;
+  smoothMouthRatio = s * smoothMouthRatio + (1-s) * rawMouth;
+  smoothRoll       = s * smoothRoll       + (1-s) * pose.roll;
+  smoothYaw        = s * smoothYaw        + (1-s) * pose.yaw;
+  smoothPitch      = s * smoothPitch      + (1-s) * pose.pitch;
+
+  // Appliquer la sensibilité bouche
+  const finalMouth = Math.min(1, smoothMouthRatio / mouthSensitivity);
+
+  // ── UI ───────────────────────────────────────
+  const pct = Math.round(finalMouth * 100);
+  meterFill.style.width    = pct + '%';
+  $('val-open').textContent = pct + '%';
+  $('mouth-out').textContent = '👄 ' + pct + '%';
+  $('rot-out').textContent   = '🔄 ' + Math.round(smoothYaw * 30) + '°';
+
+  // ── Rendu ────────────────────────────────────
+  render(finalMouth, smoothRoll, smoothYaw, smoothPitch);
+  renderMeshOverlay(lms);
+  setStatus('Animé ✨ — bouche: ' + pct + '%', 'ok');
+}
+
+// ═══════════════════════════════════════════════
+// STATUS
+// ═══════════════════════════════════════════════
+function setStatus(msg, type) {
+  $('status-text').textContent = msg;
+  $('status-box').className = 'status';
+  if (type==='loading') $('status-box').classList.add('loading');
+  if (type==='error')   $('status-box').classList.add('error');
+}
+
+// ═══════════════════════════════════════════════
+// MODE BULLE FLOTTANTE
+// ═══════════════════════════════════════════════
+
+const bubble       = document.getElementById('fp-bubble');
+const bubbleBar    = document.getElementById('bubble-bar');
+const bubbleCanvas = document.getElementById('bubble-canvas');
+const bubbleCtx    = bubbleCanvas.getContext('2d');
+const btnFloatMode = document.getElementById('btn-float-mode');
+const bbClose      = document.getElementById('bb-close');
+const bbSize       = document.getElementById('bb-size');
+
+let floatMode   = false;
+let bubbleSize  = 160;      // px — taille de la bulle
+const SIZES     = [120, 160, 200, 240]; // cycle de tailles
+let sizeIdx     = 1;
+
+// ── Activation / désactivation ────────────────
+btnFloatMode.addEventListener('click', toggleFloatMode);
+bbClose.addEventListener('click', () => setFloatMode(false));
+bbSize.addEventListener('click', () => {
+  sizeIdx = (sizeIdx + 1) % SIZES.length;
+  bubbleSize = SIZES[sizeIdx];
+  bubble.style.width  = bubbleSize + 'px';
+  bubble.style.height = bubbleSize + 'px';
+  // Recentrer la barre
+  updateBarPos();
+});
+
+function toggleFloatMode() { setFloatMode(!floatMode); }
+
+function setFloatMode(on) {
+  floatMode = on;
+  btnFloatMode.classList.toggle('active', on);
+  btnFloatMode.textContent = on ? '⬡ Mode normal' : '⬡ Mode flottant';
+
+  if (on) {
+    bubble.style.display    = 'block';
+    bubbleBar.style.display = 'flex';
+    document.querySelector('header').style.display = 'none';
+    document.querySelector('.main').style.display  = 'none';
+    updateBarPos();
+  } else {
+    bubble.style.display    = 'none';
+    bubbleBar.style.display = 'none';
+    document.querySelector('header').style.display = '';
+    document.querySelector('.main').style.display  = '';
+  }
+}
+
+function updateBarPos() {
+  const br = parseInt(bubble.style.right  || '28');
+  const bb = parseInt(bubble.style.bottom || '28');
+  bubbleBar.style.right  = (br + bubbleSize/2 - 18) + 'px';
+  bubbleBar.style.bottom = (bb + bubbleSize + 8) + 'px';
+}
+
+// ── Drag ─────────────────────────────────────
+let dragging = false, dragOffX = 0, dragOffY = 0;
+
+bubble.addEventListener('pointerdown', e => {
+  dragging = true;
+  dragOffX = e.clientX - bubble.getBoundingClientRect().left;
+  dragOffY = e.clientY - bubble.getBoundingClientRect().top;
+  bubble.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+
+bubble.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const x = e.clientX - dragOffX;
+  const y = e.clientY - dragOffY;
+  // Borner dans la fenêtre
+  const maxX = window.innerWidth  - bubbleSize;
+  const maxY = window.innerHeight - bubbleSize;
+  const cx   = Math.max(0, Math.min(maxX, x));
+  const cy   = Math.max(0, Math.min(maxY, y));
+  bubble.style.left   = cx + 'px';
+  bubble.style.top    = cy + 'px';
+  bubble.style.right  = 'auto';
+  bubble.style.bottom = 'auto';
+  // Mettre à jour la barre
+  bubbleBar.style.left   = (cx + bubbleSize/2 - 18) + 'px';
+  bubbleBar.style.top    = (cy - 46) + 'px';
+  bubbleBar.style.right  = 'auto';
+  bubbleBar.style.bottom = 'auto';
+});
+
+bubble.addEventListener('pointerup', () => { dragging = false; });
+
+// ── Rendu bulle ───────────────────────────────
+// Copie le outputCanvas dans la bulle à chaque frame
+// On applique un crop centré sur le visage (zone haute de l'image)
+function renderBubble() {
+  if (!floatMode || !imgClosed) return;
+
+  const sz = bubbleSize * (window.devicePixelRatio || 1);
+  if (bubbleCanvas.width !== sz) {
+    bubbleCanvas.width  = sz;
+    bubbleCanvas.height = sz;
+    bubbleCanvas.style.width  = bubbleSize + 'px';
+    bubbleCanvas.style.height = bubbleSize + 'px';
+  }
+
+  const src  = outputCanvas;
+  const sw   = src.width;
+  const sh   = src.height;
+
+  // Crop : on prend un carré centré sur le tiers supérieur (zone visage)
+  // sx, sy = coin supérieur gauche du carré source
+  const cropSize = Math.min(sw, sh * 0.75);  // carré couvrant ~75% de la hauteur
+  const sx = (sw - cropSize) / 2;
+  const sy = sh * 0.02;  // léger offset vers le haut pour centrer sur le visage
+
+  bubbleCtx.clearRect(0, 0, sz, sz);
+
+  // Clipping circulaire
+  bubbleCtx.save();
+  bubbleCtx.beginPath();
+  bubbleCtx.arc(sz/2, sz/2, sz/2, 0, Math.PI*2);
+  bubbleCtx.clip();
+
+  bubbleCtx.drawImage(src, sx, sy, cropSize, cropSize, 0, 0, sz, sz);
+  bubbleCtx.restore();
+
+  // Ring indicator volume (bouche)
+  if (smoothMouthRatio > 0.08) {
+    bubble.classList.add('speaking');
+  } else {
+    bubble.classList.remove('speaking');
+  }
+}
+
+// ── Hook dans la boucle de rendu ─────────────
+// On surcharge la fonction render pour appeler renderBubble après
+const _origRender = render;
+window.render = function(mouthRatio, roll, yaw, pitch) {
+  _origRender(mouthRatio, roll, yaw, pitch);
+  renderBubble();
+};
+
+// ── Rendu bulle aussi quand aucun visage ─────
+const _origOnResults = onResults;
+window.onResults = _origOnResults; // déjà hookée via faceMesh.onResults
+
+// Render bulle sur l'image neutre aussi
+function tryRenderBubbleNeutral() {
+  if (floatMode && imgClosed) renderBubble();
+}
+
+// ── Keyboard shortcut : F pour toggle flottant ──
+document.addEventListener('keydown', e => {
+  if (e.key === 'f' || e.key === 'F') toggleFloatMode();
+});
+</script>
+</body>
+</html>

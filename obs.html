@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FacePuppet OBS</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+
+/* Fond transparent pour OBS */
+html, body {
+  background: transparent !important;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── BULLE PRINCIPALE ── */
+#bubble {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  overflow: hidden;
+  cursor: grab;
+  transition: box-shadow .3s;
+}
+
+/* Ring repos */
+#bubble.idle {
+  box-shadow:
+    0 0 0 4px rgba(124,58,237,.85),
+    0 0 0 8px rgba(124,58,237,.18),
+    0 8px 40px rgba(0,0,0,.55);
+}
+
+/* Ring parole */
+#bubble.speaking {
+  box-shadow:
+    0 0 0 4px rgba(0,230,118,.95),
+    0 0 0 10px rgba(0,230,118,.22),
+    0 8px 40px rgba(0,0,0,.55);
+  animation: speak-pulse .9s ease-in-out infinite;
+}
+
+@keyframes speak-pulse {
+  0%,100% { box-shadow: 0 0 0 4px rgba(0,230,118,.95), 0 0 0 10px rgba(0,230,118,.22), 0 8px 40px rgba(0,0,0,.55); }
+  50%      { box-shadow: 0 0 0 4px rgba(0,230,118,.95), 0 0 0 18px rgba(0,230,118,.10), 0 8px 40px rgba(0,0,0,.55); }
+}
+
+#bubble-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: 50%;
+}
+
+/* ── PANEL DE CONFIG (masqué par défaut, visible si ?config=1) ── */
+#config-panel {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: #0a0a0f;
+  color: #c9d1d9;
+  font-family: 'Courier New', monospace;
+  padding: 24px;
+  overflow-y: auto;
+  z-index: 100;
+}
+
+#config-panel.visible { display: block; }
+
+h1 { font-size: 1.1rem; margin-bottom: 20px; color: #7c3aed; }
+h2 { font-size: .75rem; letter-spacing: 2px; text-transform: uppercase; color: #4a5568; margin-bottom: 10px; }
+
+.upload-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+.upload-slot {
+  border: 2px dashed #1a2030; border-radius: 10px;
+  padding: 16px 8px; text-align: center; cursor: pointer;
+  transition: all .25s; position: relative;
+}
+.upload-slot:hover { border-color: #7c3aed; background: rgba(124,58,237,.06); }
+.upload-slot.loaded { border-color: #00e676; border-style: solid; }
+.upload-slot input { display: none; }
+.upload-slot .icon { font-size: 1.6rem; display: block; margin-bottom: 5px; }
+.upload-slot strong { font-size: .72rem; display: block; margin-bottom: 2px; }
+.upload-slot p { font-size: .62rem; color: #4a5568; }
+.slot-preview { width:100%; max-height:80px; object-fit:cover; border-radius:6px; display:none; margin-top:6px; }
+
+.ctrl-row { margin-bottom: 12px; }
+.ctrl-row label { font-size: .68rem; color: #4a5568; display: flex; justify-content: space-between; margin-bottom: 4px; }
+.ctrl-row label span { color: #06b6d4; }
+input[type=range] { -webkit-appearance:none; width:100%; height:3px; background:#1a2030; border-radius:999px; outline:none; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:13px; height:13px; background:#7c3aed; border-radius:50%; cursor:pointer; }
+
+.size-btns { display: flex; gap: 8px; margin-bottom: 16px; }
+.size-btn {
+  flex: 1; padding: 8px; border-radius: 6px;
+  border: 1px solid #1a2030; background: transparent;
+  color: #4a5568; cursor: pointer; font-family: inherit;
+  font-size: .68rem; transition: all .2s;
+}
+.size-btn:hover { border-color: #7c3aed; color: #c9d1d9; }
+.size-btn.active { border-color: #7c3aed; color: #7c3aed; background: rgba(124,58,237,.1); }
+
+.btn-start {
+  width: 100%; padding: 12px; border-radius: 8px;
+  border: none; background: linear-gradient(135deg, #7c3aed, #9333ea);
+  color: white; cursor: pointer; font-family: inherit;
+  font-size: .78rem; font-weight: bold; letter-spacing: 1px;
+  transition: all .2s; margin-bottom: 8px;
+}
+.btn-start:disabled { opacity: .35; cursor: not-allowed; }
+.btn-start:hover:not(:disabled) { transform: translateY(-1px); }
+
+.btn-close {
+  width: 100%; padding: 10px; border-radius: 8px;
+  border: 1px solid #1a2030; background: transparent;
+  color: #4a5568; cursor: pointer; font-family: inherit; font-size: .72rem;
+}
+.btn-close:hover { border-color: #06b6d4; color: #06b6d4; }
+
+.status { font-size: .65rem; padding: 8px 10px; border-radius: 6px; margin-bottom: 12px;
+  border: 1px solid #1a2030; color: #4a5568; line-height: 1.5; }
+.status.ok { border-color: rgba(0,230,118,.3); color: #00e676; background: rgba(0,230,118,.06); }
+.status.loading { border-color: rgba(6,182,212,.3); color: #06b6d4; background: rgba(6,182,212,.06); }
+.status.error { border-color: rgba(255,68,68,.3); color: #ff4444; background: rgba(255,68,68,.06); }
+
+.obs-tip {
+  font-size: .62rem; line-height: 1.7; color: #4a5568;
+  padding: 10px; border: 1px solid #1a2030; border-radius: 6px;
+}
+.obs-tip strong { color: #7c3aed; }
+
+/* ── METER VOLUME (mini dans coin) ── */
+#vol-meter {
+  position: fixed;
+  bottom: 24px;
+  right: 238px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  align-items: center;
+}
+.vol-bar {
+  width: 4px;
+  height: 4px;
+  border-radius: 2px;
+  background: #1a2030;
+  transition: background .05s;
+}
+.vol-bar.on { background: #00e676; }
+
+/* drag cursor */
+#bubble:active { cursor: grabbing; }
+</style>
+</head>
+<body>
+
+<!-- Bulle OBS -->
+<div id="bubble" class="idle">
+  <canvas id="bubble-canvas"></canvas>
+</div>
+
+<!-- VU meter mini -->
+<div id="vol-meter">
+  <div class="vol-bar" id="vb-1"></div>
+  <div class="vol-bar" id="vb-2"></div>
+  <div class="vol-bar" id="vb-3"></div>
+  <div class="vol-bar" id="vb-4"></div>
+  <div class="vol-bar" id="vb-5"></div>
+</div>
+
+<!-- Panel config (visible si ?config dans l'URL) -->
+<div id="config-panel">
+  <h1>🎭 FacePuppet — Config OBS</h1>
+
+  <h2>Tes 2 images</h2>
+  <div class="upload-pair">
+    <div class="upload-slot" id="slot-closed">
+      <input type="file" id="file-closed" accept="image/*">
+      <span class="icon">😐</span>
+      <strong>Bouche fermée</strong>
+      <p>PNG transparent<br>recommandé</p>
+      <img class="slot-preview" id="prev-closed">
+    </div>
+    <div class="upload-slot" id="slot-open">
+      <input type="file" id="file-open" accept="image/*">
+      <span class="icon">😮</span>
+      <strong>Bouche ouverte</strong>
+      <p>Même pose,<br>bouche ouverte</p>
+      <img class="slot-preview" id="prev-open">
+    </div>
+  </div>
+
+  <h2>Taille de la bulle</h2>
+  <div class="size-btns">
+    <button class="size-btn" data-size="120">120px</button>
+    <button class="size-btn active" data-size="200">200px</button>
+    <button class="size-btn" data-size="280">280px</button>
+    <button class="size-btn" data-size="360">360px</button>
+  </div>
+
+  <h2>Paramètres</h2>
+  <div class="ctrl-row">
+    <label>Sensibilité bouche <span id="v-mouth">60</span>%</label>
+    <input type="range" id="ctrl-mouth" min="10" max="100" value="60">
+  </div>
+  <div class="ctrl-row">
+    <label>Rotation tête <span id="v-rot">50</span>%</label>
+    <input type="range" id="ctrl-rot" min="0" max="150" value="50">
+  </div>
+  <div class="ctrl-row">
+    <label>Lissage <span id="v-smooth">70</span>%</label>
+    <input type="range" id="ctrl-smooth" min="0" max="95" value="70">
+  </div>
+
+  <div id="status-box" class="status loading">Chargement MediaPipe…</div>
+
+  <button class="btn-start" id="btn-start" disabled>▶ Démarrer la webcam</button>
+  <button class="btn-close" id="btn-close-panel">✓ Fermer la config — retour OBS</button>
+
+  <br><br>
+  <div class="obs-tip">
+    <strong>Dans OBS :</strong><br>
+    Source → Navigateur → URL de cette page<br>
+    Largeur : 400 / Hauteur : 400<br>
+    ✅ Fond transparent activé<br>
+    ✅ CSS personnalisé : <code>body { background: transparent !important; }</code><br><br>
+    <strong>Config :</strong> ajoute <code>?config</code> à l'URL pour ouvrir ce panneau dans un onglet normal, puis retire-le pour OBS.
+  </div>
+</div>
+
+<script src="/mediapipe/camera_utils.js" crossorigin="anonymous"></script>
+<script src="/mediapipe/face_mesh.js" crossorigin="anonymous"></script>
+<script>
+// ════════════════════════════════════════════
+// ÉTAT
+// ════════════════════════════════════════════
+let imgClosed = null, imgOpen = null;
+let faceMesh  = null, mpCam  = null;
+let isRunning = false;
+
+let mouthSens = 0.60;
+let rotInt    = 0.50;
+let smooth    = 0.70;
+
+let sMouth = 0, sRoll = 0, sYaw = 0, sPitch = 0;
+
+const canvasClosed = document.createElement('canvas');
+const ctxClosed    = canvasClosed.getContext('2d');
+const canvasOpen   = document.createElement('canvas');
+const ctxOpen      = canvasOpen.getContext('2d');
+
+// Canvas de rendu intermédiaire (taille image)
+const renderCanvas = document.createElement('canvas');
+const renderCtx    = renderCanvas.getContext('2d');
+
+// Canvas bulle
+const bubble       = document.getElementById('bubble');
+const bubbleCanvas = document.getElementById('bubble-canvas');
+const bubbleCtx    = bubbleCanvas.getContext('2d');
+
+let bubbleSize = 200; // px
+
+// ════════════════════════════════════════════
+// DÉTECTION MODE : config vs OBS
+// ════════════════════════════════════════════
+const isConfig = location.search.includes('config');
+if (isConfig) {
+  document.getElementById('config-panel').classList.add('visible');
+  document.getElementById('vol-meter').style.display = 'none';
+}
+
+// ════════════════════════════════════════════
+// DOM CONFIG
+// ════════════════════════════════════════════
+const $ = id => document.getElementById(id);
+
+function setupSlot(slotId, fileId, prevId, key) {
+  const slot = $(slotId), fi = $(fileId), prev = $(prevId);
+  slot.addEventListener('click', () => fi.click());
+  fi.addEventListener('change', () => fi.files[0] && loadImg(fi.files[0], prev, slot, key));
+}
+setupSlot('slot-closed', 'file-closed', 'prev-closed', 'closed');
+setupSlot('slot-open',   'file-open',   'prev-open',   'open');
+
+function loadImg(file, prevEl, slotEl, key) {
+  const r = new FileReader();
+  r.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      if (key === 'closed') {
+        imgClosed = img;
+        canvasClosed.width = img.naturalWidth; canvasClosed.height = img.naturalHeight;
+        ctxClosed.clearRect(0,0,canvasClosed.width,canvasClosed.height);
+        ctxClosed.drawImage(img,0,0);
+      } else {
+        imgOpen = img;
+        canvasOpen.width = img.naturalWidth; canvasOpen.height = img.naturalHeight;
+        ctxOpen.clearRect(0,0,canvasOpen.width,canvasOpen.height);
+        ctxOpen.drawImage(img,0,0);
+      }
+      prevEl.src = e.target.result; prevEl.style.display = 'block';
+      slotEl.querySelector('.icon').style.display = 'none';
+      slotEl.classList.add('loaded');
+      checkReady();
+    };
+    img.src = e.target.result;
+  };
+  r.readAsDataURL(file);
+}
+
+function checkReady() {
+  const ok = imgClosed && imgOpen && faceMesh;
+  $('btn-start').disabled = !ok;
+  if (ok) setStatus('Prêt ! Lance la webcam.', 'ok');
+}
+
+// Taille bulle
+document.querySelectorAll('.size-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    bubbleSize = parseInt(btn.dataset.size);
+    setBubbleSize(bubbleSize);
+  });
+});
+
+function setBubbleSize(sz) {
+  bubble.style.width  = sz + 'px';
+  bubble.style.height = sz + 'px';
+  // Repositionner dans le coin bas-droit
+  bubble.style.bottom = '24px';
+  bubble.style.right  = '24px';
+  bubble.style.left   = 'auto';
+  bubble.style.top    = 'auto';
+}
+
+// Sliders
+$('ctrl-mouth').addEventListener('input',  () => { mouthSens = $('ctrl-mouth').value/100; $('v-mouth').textContent = $('ctrl-mouth').value; });
+$('ctrl-rot').addEventListener('input',    () => { rotInt    = $('ctrl-rot').value/100;   $('v-rot').textContent   = $('ctrl-rot').value;   });
+$('ctrl-smooth').addEventListener('input', () => { smooth    = $('ctrl-smooth').value/100; $('v-smooth').textContent= $('ctrl-smooth').value; });
+
+$('btn-close-panel').addEventListener('click', () => {
+  document.getElementById('config-panel').classList.remove('visible');
+});
+
+// ════════════════════════════════════════════
+// MEDIAPIPE
+// ════════════════════════════════════════════
+function initMP() {
+  setStatus('Chargement MediaPipe…', 'loading');
+  faceMesh = new FaceMesh({ locateFile: f => `/mediapipe/${f}` });
+  faceMesh.setOptions({ maxNumFaces:1, refineLandmarks:true, minDetectionConfidence:.5, minTrackingConfidence:.5 });
+  faceMesh.onResults(onResults);
+  faceMesh.initialize()
+    .then(() => { setStatus('MediaPipe prêt ✓', 'ok'); checkReady(); })
+    .catch(e  => setStatus('Erreur: ' + e.message, 'error'));
+}
+
+// ════════════════════════════════════════════
+// WEBCAM
+// ════════════════════════════════════════════
+const webcamVideo = document.createElement('video');
+webcamVideo.autoplay = true; webcamVideo.playsInline = true; webcamVideo.muted = true;
+
+$('btn-start').addEventListener('click', async () => {
+  if (!window.isSecureContext) { alert('HTTPS requis !'); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{ width:640, height:480, facingMode:'user' } });
+    webcamVideo.srcObject = stream;
+    await webcamVideo.play();
+    isRunning = true;
+    $('btn-start').textContent = '⏹ Arrêter';
+    $('btn-start').onclick = stopWebcam;
+    setStatus('Webcam active ✓', 'ok');
+
+    // Setup render canvas
+    renderCanvas.width  = canvasClosed.width  || 512;
+    renderCanvas.height = canvasClosed.height || 512;
+
+    mpCam = new Camera(webcamVideo, {
+      onFrame: async () => { if (isRunning) await faceMesh.send({ image: webcamVideo }); },
+      width: 640, height: 480
+    });
+    mpCam.start();
+  } catch(e) {
+    if (e.name==='NotReadableError') { alert('Caméra occupée.'); }
+    else if (e.name==='NotAllowedError') { setStatus('Permission refusée', 'error'); }
+    else { setStatus('❌ ' + e.message, 'error'); }
+  }
+});
+
+function stopWebcam() {
+  isRunning = false;
+  mpCam?.stop();
+  if (webcamVideo.srcObject) { webcamVideo.srcObject.getTracks().forEach(t=>t.stop()); webcamVideo.srcObject=null; }
+  sMouth=0; sRoll=0; sYaw=0; sPitch=0;
+  $('btn-start').textContent = '▶ Démarrer la webcam';
+  $('btn-start').onclick = null;
+  setStatus('Arrêté', 'ok');
+  renderBubbleNeutral();
+}
+
+// ════════════════════════════════════════════
+// CALCULS VISAGE
+// ════════════════════════════════════════════
+function getMouthRatio(lms) {
+  const mo = Math.abs(lms[14].y - lms[13].y);
+  const ed = Math.hypot(lms[263].x-lms[33].x, lms[263].y-lms[33].y);
+  if (ed < .001) return 0;
+  return Math.max(0, Math.min(1, (mo/ed - .04) / .31));
+}
+
+function getPose(lms) {
+  const le = lms[468]||lms[33], re = lms[473]||lms[263];
+  const nose = lms[1], chin = lms[152];
+  const roll  = Math.atan2(re.y-le.y, re.x-le.x);
+  const emx   = (le.x+re.x)/2;
+  const yaw   = (nose.x-emx)*5;
+  const emy   = (le.y+re.y)/2;
+  const fh    = Math.abs(chin.y-emy);
+  const pitch = fh>.001 ? (nose.y-emy)/fh - .35 : 0;
+  return {roll, yaw, pitch};
+}
+
+// ════════════════════════════════════════════
+// RENDU INTERMÉDIAIRE (image complète)
+// ════════════════════════════════════════════
+function renderFull(mouth, roll, yaw, pitch) {
+  const W = renderCanvas.width, H = renderCanvas.height;
+  renderCtx.clearRect(0,0,W,H);
+  renderCtx.save();
+  renderCtx.translate(W/2, H/2);
+  renderCtx.rotate(roll * rotInt * .7);
+  renderCtx.translate(yaw*W*rotInt*.06, pitch*H*rotInt*.06);
+  renderCtx.scale(1 - Math.abs(yaw)*rotInt*.08, 1);
+  renderCtx.translate(-W/2, -H/2);
+  renderCtx.globalAlpha = 1;
+  renderCtx.drawImage(canvasClosed, 0,0, W,H);
+  if (mouth > .01 && canvasOpen.width > 0) {
+    renderCtx.globalAlpha = Math.min(1, mouth*1.2);
+    renderCtx.drawImage(canvasOpen, 0,0, W,H);
+  }
+  renderCtx.restore();
+  renderCtx.globalAlpha = 1;
+}
+
+// ════════════════════════════════════════════
+// RENDU BULLE (crop carré centré visage)
+// ════════════════════════════════════════════
+function renderBubble() {
+  const dpr = window.devicePixelRatio || 1;
+  const sz  = bubbleSize * dpr;
+  if (bubbleCanvas.width !== sz) {
+    bubbleCanvas.width  = sz;
+    bubbleCanvas.height = sz;
+    bubbleCanvas.style.width  = bubbleSize + 'px';
+    bubbleCanvas.style.height = bubbleSize + 'px';
+  }
+
+  const src  = renderCanvas;
+  const sw   = src.width, sh = src.height;
+  // Carré crop — couvre le haut de l'image (zone visage)
+  const crop = Math.min(sw, sh * .78);
+  const sx   = (sw - crop) / 2;
+  const sy   = sh * .02;
+
+  bubbleCtx.clearRect(0,0,sz,sz);
+  bubbleCtx.save();
+  bubbleCtx.beginPath();
+  bubbleCtx.arc(sz/2, sz/2, sz/2, 0, Math.PI*2);
+  bubbleCtx.clip();
+  bubbleCtx.drawImage(src, sx, sy, crop, crop, 0, 0, sz, sz);
+  bubbleCtx.restore();
+}
+
+function renderBubbleNeutral() {
+  if (!imgClosed) return;
+  renderCanvas.width  = canvasClosed.width  || 512;
+  renderCanvas.height = canvasClosed.height || 512;
+  renderCtx.drawImage(canvasClosed, 0,0, renderCanvas.width, renderCanvas.height);
+  renderBubble();
+}
+
+// ════════════════════════════════════════════
+// VU METER
+// ════════════════════════════════════════════
+function updateVU(ratio) {
+  const bars = ['vb-1','vb-2','vb-3','vb-4','vb-5'];
+  const n = Math.round(ratio * bars.length);
+  bars.forEach((id,i) => {
+    const el = $(id);
+    if (el) el.classList.toggle('on', i < n);
+  });
+}
+
+// ════════════════════════════════════════════
+// CALLBACK MEDIAPIPE
+// ════════════════════════════════════════════
+function onResults(res) {
+  if (!isRunning || !imgClosed || !imgOpen) return;
+
+  if (!res.multiFaceLandmarks?.length) {
+    renderBubbleNeutral();
+    bubble.className = 'idle';
+    updateVU(0);
+    return;
+  }
+
+  const lms  = res.multiFaceLandmarks[0];
+  const raw  = getMouthRatio(lms);
+  const pose = getPose(lms);
+  const s    = smooth;
+
+  sMouth = s*sMouth + (1-s)*raw;
+  sRoll  = s*sRoll  + (1-s)*pose.roll;
+  sYaw   = s*sYaw   + (1-s)*pose.yaw;
+  sPitch = s*sPitch + (1-s)*pose.pitch;
+
+  const finalMouth = Math.min(1, sMouth/mouthSens);
+
+  // Resize renderCanvas si besoin
+  if (renderCanvas.width !== canvasClosed.width) {
+    renderCanvas.width  = canvasClosed.width  || 512;
+    renderCanvas.height = canvasClosed.height || 512;
+  }
+
+  renderFull(finalMouth, sRoll, sYaw, sPitch);
+  renderBubble();
+
+  // Ring
+  bubble.className = finalMouth > .08 ? 'speaking' : 'idle';
+
+  // VU meter
+  updateVU(finalMouth);
+}
+
+// ════════════════════════════════════════════
+// DRAG (mode OBS — pour repositionner)
+// ════════════════════════════════════════════
+let drag=false, ox=0, oy=0;
+bubble.addEventListener('pointerdown', e => {
+  drag=true; ox=e.clientX-bubble.getBoundingClientRect().left;
+  oy=e.clientY-bubble.getBoundingClientRect().top;
+  bubble.setPointerCapture(e.pointerId); e.preventDefault();
+});
+bubble.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const x = Math.max(0, Math.min(window.innerWidth  - bubbleSize, e.clientX-ox));
+  const y = Math.max(0, Math.min(window.innerHeight - bubbleSize, e.clientY-oy));
+  bubble.style.left='auto'; bubble.style.top='auto';
+  bubble.style.right=(window.innerWidth -x-bubbleSize)+'px';
+  bubble.style.bottom=(window.innerHeight-y-bubbleSize)+'px';
+});
+bubble.addEventListener('pointerup', () => drag=false);
+
+// ════════════════════════════════════════════
+// STATUS
+// ════════════════════════════════════════════
+function setStatus(msg, type) {
+  const el = $('status-box');
+  if (!el) return;
+  el.textContent = msg;
+  el.className   = 'status ' + (type||'');
+}
+
+// ════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════
+window.addEventListener('load', () => setTimeout(initMP, 400));
+</script>
+</body>
+</html>
